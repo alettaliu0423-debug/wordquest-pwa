@@ -34,6 +34,7 @@ export interface BattleRun {
   initialHp: number; currentHp: number; bossInitialHp: 8; bossCurrentHp: number;
   maxQuestionCount: number; questionSet: QuestionInstance[];
   currentQuestionIndex: number; effectiveAnswerCount: number; createdAt: string; endedAt?: string;
+  retiredQuestions?: QuestionInstance[];
 }
 export interface Answer {
   answerId: string; runId: string; questionInstanceId: string; wordId: string;
@@ -62,6 +63,8 @@ export interface RemediationTask {
   taskId: string; failureRunId: string; objectiveId: string; wordId: string; dimension: Dimension;
   scope: Scope; phase: 'teaching-required' | 'teaching-open' | 'ready' | 'awaiting-answer' | 'passed' | 'exhausted';
   revision: number; teachingClosedAt?: string; currentQuestion?: Question; passedAt?: string;
+  independencePolicy?: 2;
+  invalidatedRetests?: { questionId: string; fingerprint: string; invalidatedAt: string; reason: string }[];
 }
 export interface BattleGate {
   scope: Scope; activeRunId?: string; lockedRunId?: string; nextRunNumber: number;

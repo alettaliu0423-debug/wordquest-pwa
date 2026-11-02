@@ -1,12 +1,12 @@
 # WordQuest: The Lost Crystal
 
-Batch 1: independent project foundation, IndexedDB schema, transactional battle and mandatory-review rules.
+Version `0.2.0-batch.2` — local review build. No GitHub synchronization or deployment has been performed for batch 2.
 
-This repository is intended for original demo code and content only. It must never contain user records, parental PINs, database exports, private backups or licensed textbook content. It is independent of the PWA Delivery Test and all historical projects.
+This project contains original demo code/content only. Never commit user records, parental PINs, database exports, private backups or licensed textbook content. It is independent of PWA Delivery Test and historical projects.
 
-## Local development
+## Run locally
 
-Requires Node 24.19 or later. All application dependencies are free and open source.
+Requires Node 24.19 or later. All dependencies are free and open source.
 
 ```sh
 npm ci
@@ -15,28 +15,48 @@ npm run check
 npm run dev
 ```
 
-For a GitHub Pages project subpath:
+Home opens a playable original Demo Boss challenge. Word Bank is available before a challenge. During a saved battle or independent check, answer-bearing routes and titles are protected. Spelling uses a full text keyboard; listening questions require completed playback of bundled local audio. Transactions persist before attack/hit feedback.
+
+After defeat, Review Mistakes lists required meaning/context/spelling tasks. Read the teaching card, close it, then answer a different independent question. All tasks must pass before Retry Boss starts a new full-health run. Exhausted retest content retains the lock; there is no automatic pass or reset.
+
+## Tests
 
 ```sh
-VITE_BASE_PATH=/YOUR-REPOSITORY-NAME/ npm run build
+npm run test:unit
+npm run test:db
+VITE_BASE_PATH=/wordquest-pwa/ npm run dev -- --port 4187 --strictPort
+# In another terminal, using already available Python Playwright and Chromium:
+python3 tests/browser_smoke.py
+python3 tests/browser_interaction.py
+python3 tests/browser_defect_regression.py
 ```
 
-The local browser stores data in `wordquest-official-v1`, database version 1. This name is different from the Delivery Test database. No network synchronization of learning data is implemented.
+The browser scripts use new isolated profiles and only localhost. Learning/battle actions in `browser_interaction.py` use real UI controls; database reads are assertion-only. No real browser profile or learner data is used. Browser profiles/screenshots/reports stay in ignored `test-results/`.
 
-## Current review boundary
+## Production/offline build
 
-Implemented: React shell and original Word Bank, 24 battle questions, 18 independent retests, Dexie schema, strict HP validation, immutable battle snapshots, atomic answer/evidence/HP settlement, idempotency, stale-version rejection, defeat locks, dimension-specific teaching/retest transitions, fresh retry, scope separation and unique crystal awards.
+```sh
+VITE_BASE_PATH=/wordquest-pwa/ npm run build
+python3 tests/browser_production.py
+python3 tests/browser_crash_recovery.py
+```
 
-Not yet ready for product acceptance: interactive battle UI, attack animations, bundled offline pronunciations, parental PIN/settings UI, complete review UI, backup/restore, offline service worker, installation icons, short stories and Huawei device acceptance. Audio references in this batch are logical content references; no pronunciation assets are bundled yet. Battle services are covered by tests; the public UI does not start a challenge until the teaching/audio/battle interface is complete.
+The production test starts its own local static server, verifies the actual build cache, stops that server, restarts Chromium and completes offline battle/review/retry interactions. For a future Pages repository, use `VITE_BASE_PATH=/YOUR-REPOSITORY-NAME/`; CI derives the repository path automatically. The generated service worker retains old caches and never deletes IndexedDB. No online TTS is used. See `docs/audio.md` for WAV provenance, checksums and license attribution.
 
-Assisted battle answers never deal damage or advance a question. Their instance remains marked assisted. The next batch must provide a prevalidated replacement-question flow before exposing any assistance action. This batch exposes no battle hint or answer-view control.
+## Data and remaining acceptance gates
 
-Full spelling comparisons preserve letter order. Boundary spaces and letter case are normalized; internal spaces, missing letters and transpositions remain incorrect.
+Database: `wordquest-official-v1`, Dexie schema version 1. The 24 battle questions and 18 retests are original Demo content, not WW2 or RAZ material. Real challenges and practice mode remain explicitly rejected. Victories and remediation do not manufacture Mastered evidence. No remote learning-data synchronization is implemented.
 
-## Publication
+Still pending: Chinese PIN-protected parental management/HP entry, parent content replenishment/import, full backup/restore, spaced/daily review scheduling, short story scenes, the wider adventure map and target Huawei acceptance. Optional word formation stays disabled until relationships and retests are reviewed. Formal battles provide no hint/answer-view control; assisted instances are archived and replaced transactionally with unused content, or safely paused if none remains.
 
-No deployment is authorized by the current initialization batch. The CI workflow runs tests and builds only: it has no Pages deployment action or `pages: write` permission.
+The targeted fix review is in `docs/batch-2-fixes.md`. Review sessions are exclusive
+across tasks and connections. Old pending checks without the new safety stamp are
+invalidated with an audit trail and require teaching plus a fresh unused question.
+Other windows do not automatically display teaching answers; a visible stale
+card reports an exposure and invalidates affected pending checks.
 
-After reviewing this batch, create a new independent public GitHub repository with a README and share the exact repository URL. Synchronization must use an explicit source-file allowlist through the GitHub connector, never a blanket workspace upload. `.gitignore` alone does not protect API-based uploads.
+Current local tests do not certify Huawei soft-keyboard behavior, speaker quality, standalone installation or long-term browser storage retention. The Delivery Test's device results do not certify this separate application.
 
-See `docs/architecture.md`, `docs/requirements.md`, and `docs/migrations.md` for the rules and implementation boundaries.
+## Publication boundary
+
+The CI workflow tests/builds only: no Pages deployment action or `pages: write` permission is present. No deployment is authorized for this batch. Review the changes before any commit/synchronization. A future GitHub connector upload must use an explicit source-file allowlist; `.gitignore` alone does not protect API-based uploads.

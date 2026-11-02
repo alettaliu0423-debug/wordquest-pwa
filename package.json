@@ -1,16 +1,18 @@
 {
   "name": "wordquest-the-lost-crystal",
-  "version": "0.1.0-batch.1",
+  "version": "0.2.0-batch.2",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24.19.0" },
+  "engines": {
+    "node": ">=24.19.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "test:unit": "vitest run tests/rules.test.ts",
-    "test:db": "vitest run tests/database.test.ts",
-    "build": "tsc --noEmit && vite build",
+    "test:unit": "vitest run tests/rules.test.ts tests/audio.test.ts tests/choiceOrder.test.ts",
+    "test:db": "vitest run tests/database.test.ts tests/batch2-service.test.ts tests/remediation-safety.test.ts tests/assisted-recovery.test.ts",
+    "build": "tsc --noEmit && vite build && node scripts/build-sw.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

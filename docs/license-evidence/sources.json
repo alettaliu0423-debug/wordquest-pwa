@@ -1,0 +1,23 @@
+{
+  "retrieved_at": "2026-11-02T03:49:45.531191+00:00",
+  "sources": [
+    {
+      "file": "flite-2.2-COPYING.txt",
+      "url": "https://raw.githubusercontent.com/festvox/flite/v2.2/COPYING",
+      "bytes": 10022,
+      "sha256": "d31bceaf2823d56a8c9400f7bde3b17140e739e991eb4f203bdcf9827754ab59"
+    },
+    {
+      "file": "flite-2.2-slt.c.txt",
+      "url": "https://raw.githubusercontent.com/festvox/flite/v2.2/lang/cmu_us_slt/cmu_us_slt.c",
+      "bytes": 4458,
+      "sha256": "86904a26f803817d358bba5f7912f88dcf5f42a4a02432d09daf9fc2b4e85463"
+    },
+    {
+      "file": "flite-2.2-slt-Makefile.txt",
+      "url": "https://raw.githubusercontent.com/festvox/flite/v2.2/lang/cmu_us_slt/Makefile",
+      "bytes": 3309,
+      "sha256": "b506a220505ecfb8616c3895bde6f563b28c6c4e489f43ceb776a13b7a3a2a8c"
+    }
+  ]
+}

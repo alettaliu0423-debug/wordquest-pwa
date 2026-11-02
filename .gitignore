@@ -18,3 +18,5 @@ wordquest-backup*.json
 *.zip
 *.log
 .DS_Store
+__pycache__/
+*.pyc

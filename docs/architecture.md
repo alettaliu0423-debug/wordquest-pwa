@@ -12,9 +12,9 @@ The database and caches of the Delivery Test are not accessed. A repository subp
 
 ## Routes
 
-Currently rendered: `#/` and `#/words`. Planned: `#/learn`, `#/review`, `#/adventure`, `#/battle/:runId`, `#/parent`.
+Currently rendered: `#/`, `#/words`, `#/battle/:runId`, `#/review/:runId`. Planned: `#/learn`, `#/adventure`, `#/parent`.
 
-Hash routes avoid GitHub Pages server-side rewrite requirements. Manifest `id`, `scope`, `start_url`, icon paths and the Vite base are project-path-aware. A later, separately verified service worker must pre-cache the actual emitted chunks and audio, retain old caches during upgrades and never delete IndexedDB.
+Hash routes avoid GitHub Pages server-side rewrite requirements. Manifest `id`, `scope`, `start_url`, icon paths and the Vite base are project-path-aware. The production build generates a service worker from the actual emitted files, including audio. It retains old caches and never deletes IndexedDB. Initial installation does not claim clients; immediate update activation is available only through the explicit update control, disabled during an active battle or mandatory review. Natural activation after all old clients close still retains old resources. Local cold-restart testing is separate from target-device acceptance.
 
 ## Battle state machine
 
@@ -47,3 +47,36 @@ The service never grants `Mastered` on battle victory or remediation. Cross-day 
 Every business store carries scope. Words are unique by scope + normalized spelling, preserving source associations and separate objectives. All batch-1 game services accept demo only. No real textbook data is included. Future parent imports and backup files remain local and are outside the source/published-asset allowlist.
 
 No hard-coded PIN, user identity, telemetry, paid service, runtime API credential or remote learning-data endpoint is present.
+
+## Batch 2 UI boundary
+
+The app uses one runtime GameService with a local-audio preflight injected before battle transactions. The UI never edits HP, terminal status, locks or reward rows. Question submission IDs survive repeated clicks on the same form; database version checks remain authoritative across tabs. All feedback follows a successful transaction result.
+
+During independent checks, route protection takes priority over saved historical results and Word Bank. Pending checks are derived synchronously on first render, so refresh cannot flash an answer-bearing task list. Loading and protected-session titles omit the target word from the product subtitle. Teaching content is physically unmounted before a spelling retest is rendered.
+
+Choice order is stable for a persisted question instance and varies between instances. Reordering never changes a fingerprint or counts as a new question. Audio is a cached, integrity-checked WAV Blob rather than system/online TTS; playback failure cannot settle a question.
+
+Battle and review UI support restart recovery. A failure to save keeps the same form and causes no attack animation. No catch path deletes database contents or browser caches. Parent controls and assistance buttons are not exposed in this batch; persisted assisted instances can recover safely through question replacement.
+
+## Targeted review and assistance guards
+
+Every teaching/open/close/presentation/submission transition checks the task's
+saved revision inside a read/write transaction covering all stores. A review
+episode permits one teaching/ready/awaiting task across every dimension. Session
+transitions also advance sibling revisions, so an old request cannot become valid
+after another task finishes. Legacy conflicting or unverified pending checks are
+invalidated with an audit; exposure rows and original battle answers are retained.
+
+Teaching display requires an up-to-date transactional grant in the window that
+requested it. Background/pagehide removes the display grant; reopening verifies
+it again. An actually displayed stale card reports a durable idempotent exposure,
+invalidating affected same-word pending checks. Unrequested/restored windows show
+no teaching answer. Invalidated checks require teaching and unused new content;
+exhaustion never releases the lock. Audit fingerprints stay out of the UI DTO.
+
+Assisted battle instances retain their raw answer, evidence and archived snapshot.
+Presentation replaces them with a unique unseen question for the same scoped
+target/type, without changing HP, effective progress or the slot. An unshown
+reserve can move into the slot only if another unused question fills that reserve.
+The first eight required types remain intact. All allocation/exposure/version
+writes commit together; exhaustion keeps the run active with no settlement.

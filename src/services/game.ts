@@ -9,9 +9,9 @@ import {
   validateHp, validateQuestion,
 } from '../domain/rules';
 
-export type BattleView = Omit<BattleRun, 'questionSet'>;
-function battleView(run: BattleRun): BattleView {
-  const { questionSet: _questions, ...view } = run;
+export type BattleView = Omit<BattleRun, 'questionSet' | 'retiredQuestions'>;
+export function battleView(run: BattleRun): BattleView {
+  const { questionSet: _questions, retiredQuestions: _retired, ...view } = run;
   return view;
 }
 type BattleResult = { kind: 'settled' | 'assisted' | 'duplicate' | 'ignored'; run: BattleView; reason?: string };
@@ -24,7 +24,7 @@ const freshDimensions = (): LearningState['dimensions'] => ({
 
 /** The only application service that may settle battles, unlock retries or grant crystals. */
 export class GameService {
-  constructor(private readonly db: WordQuestDB) {}
+  constructor(private readonly db: WordQuestDB, private readonly assets?: { beforeStart(): Promise<void> }) {}
 
   async setPlayerHp(value: unknown): Promise<void> {
     const hp = validateHp(value);
@@ -34,6 +34,7 @@ export class GameService {
   async startChallenge(request: { mode?: string; scope?: Scope } = {}): Promise<BattleView> {
     requireRule((request.mode ?? 'boss') === 'boss', 'PRACTICE_NOT_AVAILABLE');
     requireRule((request.scope ?? 'demo') === 'demo', 'REAL_CHALLENGES_NOT_AVAILABLE');
+    await this.assets?.beforeStart();
     return this.db.transaction('rw', this.db.tables, async () => {
       const gate = await this.db.gates.get('demo');
       requireRule(gate, 'CONTENT_NOT_READY');
@@ -65,8 +66,12 @@ export class GameService {
       const run = await this.db.runs.get(runId);
       const gate = await this.db.gates.get('demo');
       requireRule(run && run.scope === 'demo' && run.status === 'active' && gate?.activeRunId === runId, 'RUN_NOT_ACTIVE');
-      const instance = run.questionSet[run.currentQuestionIndex];
+      let instance = run.questionSet[run.currentQuestionIndex];
       requireRule(instance && !instance.settled, 'INVALID_QUESTION_INSTANCE');
+      if (instance.assisted) {
+        await this.replaceAssistedQuestion(run);
+        instance = run.questionSet[run.currentQuestionIndex];
+      }
       if (!instance.presentedAt) {
         instance.presentedAt = now();
         run.version += 1;
@@ -75,6 +80,29 @@ export class GameService {
       }
       return { run: battleView(run), instanceId: instance.instanceId, question: publicQuestion(instance.question) };
     });
+  }
+
+  private async replaceAssistedQuestion(run: BattleRun): Promise<void> {
+    const current = run.questionSet[run.currentQuestionIndex];
+    // Keep every allocated future question distinct and keep the required slot's type.
+    const used = new Set([...run.questionSet, ...(run.retiredQuestions || [])].map(i => i.question.fingerprint));
+    const shown = new Set((await this.db.exposures.where('runId').equals(run.runId).toArray()).map(e => e.questionFingerprint));
+    const pool = await this.db.questions.where('[scope+purpose]').equals(['demo', 'battle']).toArray();
+    const replacement = pool.find(q => q.objectiveId === current.question.objectiveId && q.wordId === current.question.wordId && q.type === current.question.type && !shown.has(q.fingerprint)
+      && (!used.has(q.fingerprint) || run.questionSet.some((i, index) => index >= 8 && index > run.currentQuestionIndex && !i.presentedAt && i.question.fingerprint === q.fingerprint)));
+    requireRule(replacement, 'ASSISTED_REPLACEMENT_EXHAUSTED');
+    validateQuestion(replacement, await this.db.words.where('scope').equals('demo').toArray(), await this.db.objectives.where('scope').equals('demo').toArray());
+    const reservedIndex = run.questionSet.findIndex(i => i.question.fingerprint === replacement.fingerprint);
+    if (reservedIndex !== -1) {
+      const filler = pool.find(q => !used.has(q.fingerprint) && !shown.has(q.fingerprint));
+      requireRule(filler, 'ASSISTED_REPLACEMENT_EXHAUSTED');
+      validateQuestion(filler, await this.db.words.where('scope').equals('demo').toArray(), await this.db.objectives.where('scope').equals('demo').toArray());
+      run.questionSet[reservedIndex] = { instanceId: `${run.runId}:reserve:${id()}`, question: structuredClone(filler), assisted: false, settled: false };
+    }
+    run.retiredQuestions = [...(run.retiredQuestions || []), structuredClone(current)];
+    run.questionSet[run.currentQuestionIndex] = { instanceId: `${run.runId}:replacement:${id()}`, question: structuredClone(replacement), assisted: false, settled: false };
+    run.version += 1;
+    // Saved together with the new presentation by presentBattleQuestion's transaction.
   }
 
   async submitBattle(input: Submission): Promise<BattleResult> {
@@ -136,11 +164,12 @@ export class GameService {
   async beginTeaching(taskId: string, expectedRevision: number) {
     return this.db.transaction('rw', this.db.tables, async () => {
       const task = await this.checkedTask(taskId, expectedRevision);
-      requireRule(task.phase === 'teaching-required', 'TEACHING_NOT_REQUIRED');
+      await this.requireExclusiveReview(task);
+      requireRule(task.phase === 'teaching-required' || task.phase === 'teaching-open', 'TEACHING_NOT_REQUIRED');
       const objective = await this.db.objectives.get(task.objectiveId);
       const word = await this.db.words.get(task.wordId);
       requireRule(objective && word && objective.scope === 'demo' && word.scope === 'demo', 'UNKNOWN_OBJECTIVE');
-      task.phase = 'teaching-open'; task.revision += 1;
+      if (task.phase !== 'teaching-open') { task.phase = 'teaching-open'; task.revision += 1; await this.advanceReviewPeers(task); }
       await this.db.remediationTasks.put(task);
       return { task, objective, word };
     });
@@ -149,8 +178,10 @@ export class GameService {
   async closeTeaching(taskId: string, expectedRevision: number): Promise<RemediationTask> {
     return this.db.transaction('rw', this.db.tables, async () => {
       const task = await this.checkedTask(taskId, expectedRevision);
+      await this.requireExclusiveReview(task);
       requireRule(task.phase === 'teaching-open', 'TEACHING_NOT_OPEN');
-      task.phase = 'ready'; task.teachingClosedAt = now(); task.revision += 1;
+      task.phase = 'ready'; task.teachingClosedAt = now(); task.revision += 1; task.independencePolicy = 2;
+      await this.advanceReviewPeers(task);
       await this.db.remediationTasks.put(task);
       return task;
     });
@@ -160,6 +191,11 @@ export class GameService {
     return this.db.transaction('rw', this.db.tables, async () => {
       const task = await this.checkedTask(taskId, expectedRevision);
       requireRule((task.phase === 'ready' || task.phase === 'awaiting-answer') && task.teachingClosedAt, 'TEACHING_MUST_BE_CLOSED');
+      if (await this.unsafeRetest(task)) {
+        await this.invalidateRetest(task, 'unverified-or-conflicting-teaching');
+        return { taskId, revision: task.revision, exhausted: false, invalidated: true, question: undefined };
+      }
+      await this.requireExclusiveReview(task);
       if (task.phase === 'awaiting-answer') {
         requireRule(task.currentQuestion, 'MISSING_RETEST');
         return { taskId, revision: task.revision, exhausted: false, question: publicQuestion(task.currentQuestion) };
@@ -170,6 +206,7 @@ export class GameService {
       const candidates = await this.db.questions.where('[scope+purpose]').equals(['demo', 'retest']).toArray();
       const question = candidates.find(q => q.objectiveId === task.objectiveId && q.wordId === task.wordId && dimensionOf(q.type) === task.dimension && !shown.has(q.fingerprint));
       task.revision += 1;
+      await this.advanceReviewPeers(task);
       if (!question) {
         task.phase = 'exhausted';
         await this.db.remediationTasks.put(task);
@@ -192,6 +229,11 @@ export class GameService {
       }
       const task = await this.checkedTask(input.taskId, input.expectedRevision);
       requireRule(task.phase === 'awaiting-answer' && task.currentQuestion && task.teachingClosedAt, 'NO_ACTIVE_RETEST');
+      if (await this.unsafeRetest(task)) {
+        await this.invalidateRetest(task, 'unverified-or-conflicting-teaching');
+        return { kind: 'invalidated' as const };
+      }
+      await this.requireExclusiveReview(task);
       if (typeof input.answer !== 'string' || !input.answer.trim()) return { kind: 'ignored' as const };
       const assisted = !!(input.usedHint || input.viewedAnswer);
       const question = task.currentQuestion;
@@ -205,6 +247,7 @@ export class GameService {
       if (correct && !assisted) { task.phase = 'passed'; task.passedAt = now(); }
       else { task.phase = 'teaching-required'; task.teachingClosedAt = undefined; }
       await this.db.remediationTasks.put(task);
+      await this.advanceReviewPeers(task);
       const tasks = await this.db.remediationTasks.where('failureRunId').equals(task.failureRunId).toArray();
       if (tasks.length && tasks.every(t => t.phase === 'passed')) {
         const gate = await this.db.gates.get('demo');
@@ -212,6 +255,68 @@ export class GameService {
         await this.db.gates.put({ ...gate, lockedRunId: undefined });
       }
       return { kind: task.phase === 'passed' ? 'passed' as const : 'needs-teaching' as const };
+    });
+  }
+
+  private async requireExclusiveReview(task: RemediationTask): Promise<void> {
+    const siblings = await this.db.remediationTasks.where('failureRunId').equals(task.failureRunId).toArray();
+    requireRule(!siblings.some(t => t.taskId !== task.taskId && ['teaching-open', 'ready', 'awaiting-answer'].includes(t.phase)), 'REVIEW_SESSION_BUSY');
+  }
+
+  private async advanceReviewPeers(task: RemediationTask): Promise<void> {
+    const siblings = await this.db.remediationTasks.where('failureRunId').equals(task.failureRunId).toArray();
+    for (const other of siblings) if (other.taskId !== task.taskId) {
+      other.revision += 1; await this.db.remediationTasks.put(other);
+    }
+  }
+
+  private async unsafeRetest(task: RemediationTask): Promise<boolean> {
+    if (task.independencePolicy !== 2) return true;
+    const others = await this.db.remediationTasks.where('failureRunId').equals(task.failureRunId).toArray();
+    return others.some(t => t.taskId !== task.taskId && ['teaching-open', 'ready', 'awaiting-answer'].includes(t.phase));
+  }
+
+  private async invalidateRetest(task: RemediationTask, reason: string): Promise<void> {
+    if (task.currentQuestion) {
+      task.invalidatedRetests = [...(task.invalidatedRetests || []), { questionId: task.currentQuestion.questionId, fingerprint: task.currentQuestion.fingerprint, invalidatedAt: now(), reason }];
+    }
+    task.currentQuestion = undefined; task.phase = 'teaching-required';
+    task.teachingClosedAt = undefined; task.independencePolicy = undefined; task.revision += 1;
+    await this.db.remediationTasks.put(task);
+    await this.advanceReviewPeers(task);
+  }
+
+  /** Upgrade legacy pending checks conservatively without deleting evidence or exposures. */
+  async reconcileReviewSafety(): Promise<void> {
+    await this.db.transaction('rw', this.db.tables, async () => {
+      const gate = await this.db.gates.get('demo');
+      if (!gate?.lockedRunId) return;
+      const tasks = await this.db.remediationTasks.where('failureRunId').equals(gate.lockedRunId).toArray();
+      const active = tasks.filter(t => ['teaching-open', 'ready', 'awaiting-answer'].includes(t.phase));
+      if (active.length > 1) {
+        for (const old of active) await this.invalidateRetest((await this.db.remediationTasks.get(old.taskId))!, 'legacy-conflicting-session');
+        return;
+      }
+      for (const old of tasks) {
+        const task = (await this.db.remediationTasks.get(old.taskId))!;
+        if (['ready', 'awaiting-answer'].includes(task.phase) && await this.unsafeRetest(task)) await this.invalidateRetest(task, 'legacy-pending-check');
+      }
+    });
+  }
+
+  /** A visible stale teaching card reports a durable, idempotent exposure event. */
+  async reportReviewExposure(taskId: string, observedRevision: number): Promise<void> {
+    await this.db.transaction('rw', this.db.tables, async () => {
+      const source = await this.db.remediationTasks.get(taskId);
+      const gate = await this.db.gates.get('demo');
+      if (!source || source.scope !== 'demo' || gate?.lockedRunId !== source.failureRunId) return;
+      const eventId = `demo:teaching-exposure:${taskId}:${observedRevision}`;
+      if (await this.db.metadata.get(eventId)) return;
+      await this.db.metadata.add({ id: eventId, scope: 'demo', value: now() });
+      for (const old of await this.db.remediationTasks.where('failureRunId').equals(source.failureRunId).toArray()) {
+        const target = (await this.db.remediationTasks.get(old.taskId))!;
+        if (target.wordId === source.wordId && ['ready', 'awaiting-answer'].includes(target.phase)) await this.invalidateRetest(target, 'stale-teaching-exposure');
+      }
     });
   }
 
