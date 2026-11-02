@@ -1,0 +1,28 @@
+name: Verify WordQuest source
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build for the repository project path
+        shell: bash
+        run: VITE_BASE_PATH="/${GITHUB_REPOSITORY#*/}/" npm run build
+
+# Intentionally no deploy-pages action or pages/id-token write permission.

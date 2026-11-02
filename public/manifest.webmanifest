@@ -1,0 +1,12 @@
+{
+  "id": "./",
+  "name": "WordQuest: The Lost Crystal",
+  "short_name": "WordQuest",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f2e9",
+  "theme_color": "#122d2a",
+  "icons": [{ "src": "./crystal.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
