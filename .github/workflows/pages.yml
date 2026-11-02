@@ -1,0 +1,57 @@
+name: Deploy WordQuest Demo to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wordquest-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'alettaliu0423-debug/wordquest-pwa' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Check existing Pages configuration
+        uses: actions/configure-pages@v5
+        with:
+          enablement: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build the WordQuest project path
+        run: npm run build
+        env:
+          VITE_BASE_PATH: /wordquest-pwa/
+      - name: Upload static build only
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy the verified build
+        id: deployment
+        uses: actions/deploy-pages@v4
